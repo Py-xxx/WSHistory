@@ -6,3 +6,4 @@
 # The token lives in /etc/wshistory.env on the Pi, never in the repo.
 *.env
 __pycache__/
+data.md
