@@ -52,7 +52,7 @@ to forget when rotating. One root-only file is simpler to reason about.
 The only time relics.run is fetched in bulk — once, ever, for every user.
 
 ```bash
-sudo /opt/wshistory/wshistory.py backfill --days 30
+/opt/wshistory/wshistory.py backfill --days 30
 ```
 
 Takes a few minutes; it sleeps between fetches on purpose. Re-running is safe — days already in
@@ -118,7 +118,7 @@ a second, having made one conditional request.
 If the Pi is off for longer than the window, catch up by hand:
 
 ```bash
-sudo /opt/wshistory/wshistory.py publish --window 30
+/opt/wshistory/wshistory.py publish --window 30
 ```
 
 ## Verifying it works
@@ -128,5 +128,17 @@ sudo /opt/wshistory/wshistory.py publish --window 30
 curl -s https://github.com/Py-xxx/WSHistory/releases/download/manifest/manifest.json | head -20
 
 # Force a specific day (idempotent — skipped if already published)
-sudo /opt/wshistory/wshistory.py publish --day 2026-08-16
+/opt/wshistory/wshistory.py publish --day 2026-08-16
 ```
+
+## Failures seen in practice
+
+Every one of these was hit during the first real deployment.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `EACCES: permission denied, open '/var/log/wshistory/out.log'` | Log directory owned by root, pm2 runs as `pi` | `sudo chown -R pi:pi /var/log/wshistory` |
+| App missing after a reboot | `pm2 save` ran while the app was not started, so the dump recorded a list without it | Start it, confirm in `pm2 ls`, then `pm2 save` again |
+| `WSH_TOKEN is required to publish` | `pi` cannot read `/etc/wshistory.env` | `sudo chown pi:pi /etc/wshistory.env` (keep it `600`) |
+| App missing from your usual `pm2 ls` | Started under `sudo`, creating a second daemon under root | `sudo pm2 delete wshistory`, then start again without `sudo` |
+| `--window` not in `publish --help` | An older copy of the script is still in `/opt/wshistory` | Re-copy from the repo |
