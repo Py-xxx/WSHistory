@@ -35,8 +35,12 @@ sudo tee /etc/wshistory.env >/dev/null <<'EOF'
 WSH_REPO=Py-xxx/WSHistory
 WSH_TOKEN=github_pat_...
 EOF
+sudo chown pi:pi /etc/wshistory.env   # the user pm2 runs as must be able to read it
 sudo chmod 600 /etc/wshistory.env
 ```
+
+Owned by the pm2 user and readable by nobody else. If this is left root-owned, the script runs
+but exits with `WSH_TOKEN is required to publish`, because it silently found no env file.
 
 `ecosystem.config.js` is committed to a public repo, and `pm2 save` writes the captured
 environment into `~/.pm2/dump.pm2` — a token in either would end up in two places that are easy
