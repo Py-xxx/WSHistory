@@ -5,12 +5,24 @@ during an OS upgrade two years from now.
 
 ## 1. Install
 
+First decide **which user runs pm2**, because it determines ownership below. pm2 runs a separate
+daemon per user, so if your existing apps are listed by a plain `pm2 ls`, they run as that user
+and this one must too — mixing `sudo pm2` and `pm2` silently creates a second daemon and the app
+will not appear alongside the others.
+
+```bash
+pm2 ls            # if this lists your apps without sudo, use that user below (assumed: pi)
+```
+
 ```bash
 sudo install -d -m 0755 /opt/wshistory
-sudo install -d -m 0755 /var/log/wshistory
-sudo cp scripts/wshistory.py /opt/wshistory/
-sudo cp ecosystem.config.js /opt/wshistory/
+sudo cp scripts/wshistory.py ecosystem.config.js /opt/wshistory/
 sudo chmod +x /opt/wshistory/wshistory.py
+
+# pm2 writes the logs, so the log directory must be owned by the user pm2 runs as —
+# root-owned 0755 gives "EACCES: permission denied, open '/var/log/wshistory/out.log'".
+# /opt/wshistory can stay root-owned: the script only needs read + execute.
+sudo install -d -m 0755 -o pi -g pi /var/log/wshistory
 ```
 
 ## 2. Configure
@@ -50,13 +62,16 @@ the manifest are skipped.
 
 ```bash
 cd /opt/wshistory
-sudo pm2 start ecosystem.config.js
-sudo pm2 save
+pm2 start ecosystem.config.js
+pm2 save
 ```
 
-Run it as whichever user owns your other pm2 apps; it needs read access to
-`/etc/wshistory.env`, so either run as root or relax that file's ownership to that user
-(keeping it `600`).
+Use the same user as your other pm2 apps — **no `sudo`** if they run as `pi`.
+
+**`pm2 save` only persists what is currently running.** If the start failed and you saved
+anyway, the dump records a list *without* this app and it will not come back after a reboot —
+so fix the failure, start it, and save again. Confirm with `pm2 ls` that `wshistory` is in the
+list before saving.
 
 If pm2 is not yet set to survive reboots:
 
