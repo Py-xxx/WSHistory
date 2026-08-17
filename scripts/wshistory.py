@@ -277,12 +277,46 @@ def publish_day(github: GitHub, manifest: dict, day: str) -> bool:
 
 
 def command_publish(args, github: GitHub) -> int:
-    day = args.day or f"{dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)}"
+    """Publish any day missing from the recent window — not just yesterday.
+
+    Self-healing on purpose. The scheduler cannot be relied on to have run: pm2 has no
+    equivalent of systemd's `Persistent=true`, so a Pi that is off at the scheduled time simply
+    misses that firing with no catch-up. If this only ever published yesterday, a box off for
+    two days would lose those days for good.
+
+    Walking a small window instead means correctness does not depend on the scheduler at all —
+    any missed day is picked up by the next run that happens to fire, whatever the cause.
+    """
     manifest = load_manifest(github)
-    if publish_day(github, manifest, day):
-        write_manifest(github, manifest)
+
+    if args.day:
+        if publish_day(github, manifest, args.day):
+            write_manifest(github, manifest)
         return 0
-    # Nothing published is not a failure — cron runs before upstream is ready most mornings.
+
+    today = dt.datetime.now(dt.timezone.utc).date()
+    have = {entry["day"] for entry in manifest["days"]}
+    # Newest first, so the most useful day lands even if a later fetch fails.
+    missing = [
+        str(today - dt.timedelta(days=offset))
+        for offset in range(1, args.window + 1)
+        if str(today - dt.timedelta(days=offset)) not in have
+    ]
+    if not missing:
+        log("nothing to do — window is complete")
+        return 0
+
+    published = 0
+    for index, day in enumerate(missing):
+        if index:
+            time.sleep(args.delay)  # unhurried against a free host when filling a gap
+        if publish_day(github, manifest, day):
+            write_manifest(github, manifest)  # after each, so a crash loses at most one
+            published += 1
+
+    if published:
+        log(f"published {published} day(s)")
+    # Publishing nothing is not a failure: most runs fire before upstream is ready.
     return 0
 
 
@@ -328,14 +362,52 @@ def command_check(args, github: GitHub) -> int:
         return 1
 
 
+DEFAULT_ENV_FILE = "/etc/wshistory.env"
+
+
+def load_env_file(path: str) -> None:
+    """Read `KEY=VALUE` lines into the environment, without overriding what is already set.
+
+    Exists so the token never has to live in `ecosystem.config.js` — that file is committed,
+    and pm2 also bakes the environment into `~/.pm2/dump.pm2` on `pm2 save`, which would put a
+    credential in a second place that is easy to forget about. Reading it at runtime from a
+    root-only file keeps it in exactly one location, and rotating it means editing that file
+    rather than restarting with a fresh environment.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        log(f"warning: could not read {path}: {error}")
+        return
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        # Real environment wins, so an operator can override for a one-off run.
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", default=os.environ.get("WSH_REPO"),
-                        help="owner/name (env: WSH_REPO)")
+    parser.add_argument("--repo", help="owner/name (env: WSH_REPO)")
+    parser.add_argument("--env-file", default=os.environ.get("WSH_ENV_FILE", DEFAULT_ENV_FILE),
+                        help=f"KEY=VALUE file read if the environment is unset (default: {DEFAULT_ENV_FILE})")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("publish"); p.add_argument("--day"); p.set_defaults(fn=command_publish)
+    p = sub.add_parser("publish")
+    p.add_argument("--day", help="publish exactly this day instead of filling the window")
+    p.add_argument("--window", type=int, default=7,
+                   help="how many days back to fill in when a run was missed (default: 7)")
+    p.add_argument("--delay", type=float, default=3.0, help="seconds between upstream fetches")
+    p.set_defaults(fn=command_publish)
     p = sub.add_parser("backfill")
     p.add_argument("--days", type=int, default=30)
     p.add_argument("--delay", type=float, default=3.0, help="seconds between upstream fetches")
@@ -343,8 +415,11 @@ def main() -> int:
     p = sub.add_parser("check"); p.add_argument("--day"); p.set_defaults(fn=command_check)
 
     args = parser.parse_args()
+    load_env_file(args.env_file)
+    args.repo = args.repo or os.environ.get("WSH_REPO")
     if not args.repo:
-        print("error: --repo or WSH_REPO is required", file=sys.stderr)
+        print(f"error: --repo, WSH_REPO, or WSH_REPO in {args.env_file} is required",
+              file=sys.stderr)
         return 2
     token = os.environ.get("WSH_TOKEN", "")
     if not token and args.command != "check":

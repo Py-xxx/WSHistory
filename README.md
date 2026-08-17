@@ -1,7 +1,7 @@
 # WSHistory
 
 Daily Warframe market price history, re-published in a small, pre-filtered form for
-[WarStonks](https://github.com/) to consume.
+[WarStonks](https://github.com/Py-xxx/WarStonks) to consume.
 
 **The data is not ours.** It is aggregated and published by **[relics.run](https://relics.run)**,
 which derives it from [Warframe.Market](https://warframe.market). This repository is a
@@ -23,3 +23,8 @@ This moves that to **one fetch per day, globally**:
 | New-user backfill (30 days) | ~117 MB | **~4 MB** |
 
 
+
+## Setup
+
+Deployment on the Raspberry Pi (pm2): **[docs/DEPLOY.md](docs/DEPLOY.md)**
+Published file format: **[docs/FORMAT.md](docs/FORMAT.md)**
