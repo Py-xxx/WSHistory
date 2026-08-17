@@ -1,0 +1,8 @@
+# Local scratch when testing the transform by hand.
+*.json
+*.json.gz
+!docs/*.json
+
+# The token lives in /etc/wshistory.env on the Pi, never in the repo.
+*.env
+__pycache__/
